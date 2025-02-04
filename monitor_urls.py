@@ -22,7 +22,7 @@ FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failure
 FAILURE_THRESHOLD = 5
 TIMEOUT = 10  # Increased timeout for local IPs
 
-# Load failure counts from a file
+# Load failure counts & notification states
 def load_failures():
     if os.path.exists(FAILURE_FILE):
         try:
@@ -33,14 +33,13 @@ def load_failures():
             return {}
     return {}
 
-# Save failure counts to a file
+# Save failure counts & notification states
 def save_failures(failures):
     with open(FAILURE_FILE, "w") as f:
         json.dump(failures, f)
 
-# Persistent failure tracking
-failure_counts = load_failures()
-recovery_sent = {}
+# Persistent tracking of failures and sent notifications
+failures = load_failures()
 
 def is_local_ip(url):
     """Returns True if the URL is a local network IP (192.168.x.x or similar)."""
@@ -105,8 +104,8 @@ def notify_discord(webhook, message):
         print(f"[ERROR] Discord notification failed: {e}")
 
 def monitor():
-    """Monitors URLs, sending alerts on failures and recoveries."""
-    global failure_counts, recovery_sent
+    """Monitors URLs, sending alerts on failures and recoveries only once."""
+    global failures
     urls = load_urls()
     
     for entry in urls:
@@ -119,27 +118,34 @@ def monitor():
 
         keyword_missing = keyword and reachable and not keyword_found(content, keyword)
 
-        if not reachable or keyword_missing:
-            failure_counts[url] = failure_counts.get(url, 0) + 1
-            print(f"[WARNING] {description} ({url}) failure count: {failure_counts[url]}/{FAILURE_THRESHOLD}")
+        # Load existing failure count & notification status
+        failure_count = failures.get(url, {}).get("failures", 0)
+        notified = failures.get(url, {}).get("notified", False)
 
-            if failure_counts[url] >= FAILURE_THRESHOLD:
-                if not recovery_sent.get(url, False):
-                    if not reachable:
-                        msg = f"❌ {description} ({url}) DOWN"
-                    elif keyword_missing:
-                        msg = f"⚠️ {description} ({url}) MISSING '{keyword}'"
-                    notify_discord(webhook, msg)
-                    recovery_sent[url] = True  # Prevent multiple alerts
+        if not reachable or keyword_missing:
+            failure_count += 1
+            print(f"[WARNING] {description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
+
+            # Notify only once when threshold is reached
+            if failure_count >= FAILURE_THRESHOLD and not notified:
+                if not reachable:
+                    msg = f"❌ {description} ({url}) DOWN"
+                elif keyword_missing:
+                    msg = f"⚠️ {description} ({url}) MISSING '{keyword}'"
+                notify_discord(webhook, msg)
+                failures[url] = {"failures": failure_count, "notified": True}  # Mark as notified
         else:
-            if failure_counts.get(url, 0) >= FAILURE_THRESHOLD:
+            if failure_count >= FAILURE_THRESHOLD and notified:
                 notify_discord(webhook, f"✅ {description} ({url}) UP")
             print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
-            failure_counts[url] = 0
-            recovery_sent[url] = False
+            failure_count = 0  # Reset failures
+            notified = False  # Reset notification status
 
-    # Save failure counts to disk after each run
-    save_failures(failure_counts)
+        # Save updated failure count & notification status
+        failures[url] = {"failures": failure_count, "notified": notified}
+
+    # Persist failure states
+    save_failures(failures)
 
 if __name__ == "__main__":
     monitor()
