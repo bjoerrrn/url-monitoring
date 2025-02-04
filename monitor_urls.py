@@ -36,7 +36,7 @@ def load_failures():
 # Save failure counts & notification states
 def save_failures(failures):
     with open(FAILURE_FILE, "w") as f:
-        json.dump(failures, f)
+        json.dump(failures, f, indent=2)
 
 # Persistent tracking of failures and sent notifications
 failures = load_failures()
@@ -119,11 +119,12 @@ def monitor():
         keyword_missing = keyword and reachable and not keyword_found(content, keyword)
 
         # Load existing failure count & notification status
-        failure_count = failures.get(url, {}).get("failures", 0)
-        notified = failures.get(url, {}).get("notified", False)
+        failure_data = failures.get(url, {"failures": 0, "notified": False})
+        failure_count = failure_data["failures"]
+        notified = failure_data["notified"]
 
         if not reachable or keyword_missing:
-            failure_count += 1
+            failure_count = min(failure_count + 1, FAILURE_THRESHOLD)  # Cap at threshold
             print(f"[WARNING] {description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
 
             # Notify only once when threshold is reached
@@ -133,7 +134,7 @@ def monitor():
                 elif keyword_missing:
                     msg = f"⚠️ {description} ({url}) MISSING '{keyword}'"
                 notify_discord(webhook, msg)
-                failures[url] = {"failures": failure_count, "notified": True}  # Mark as notified
+                notified = True  # Mark as notified
         else:
             if failure_count >= FAILURE_THRESHOLD and notified:
                 notify_discord(webhook, f"✅ {description} ({url}) UP")
