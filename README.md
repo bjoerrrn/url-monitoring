@@ -17,8 +17,8 @@ This script monitors a list of URLs, checking if they are reachable. If a URL fa
 On a **Raspberry Pi**, run:  
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip
-pip3 install requests
+sudo apt install python3 python3-pip -y
+pip install requests beautifulsoup4 urllib3
 ```
 
 ### **2️⃣ Clone This Repository**
