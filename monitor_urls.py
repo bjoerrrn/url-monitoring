@@ -6,6 +6,7 @@
 # This script is licensed under GNU GPL version 3.0 or above
 
 import os
+import json
 import requests
 import shlex
 import urllib3
@@ -17,11 +18,28 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_urls.credo")
+FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failures.json")
 FAILURE_THRESHOLD = 5
 TIMEOUT = 10  # Increased timeout for local IPs
 
-# In-memory tracking
-failure_counts = {}
+# Load failure counts from a file
+def load_failures():
+    if os.path.exists(FAILURE_FILE):
+        try:
+            with open(FAILURE_FILE, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print("[ERROR] Failed to parse failures.json, resetting...")
+            return {}
+    return {}
+
+# Save failure counts to a file
+def save_failures(failures):
+    with open(FAILURE_FILE, "w") as f:
+        json.dump(failures, f)
+
+# Persistent failure tracking
+failure_counts = load_failures()
 recovery_sent = {}
 
 def is_local_ip(url):
@@ -119,6 +137,9 @@ def monitor():
             print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
             failure_counts[url] = 0
             recovery_sent[url] = False
+
+    # Save failure counts to disk after each run
+    save_failures(failure_counts)
 
 if __name__ == "__main__":
     monitor()
