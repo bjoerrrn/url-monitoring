@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-# v1.0.0
+# v1.0.1
 # monitor_urls - by bjoerrrn
 # github: https://github.com/bjoerrrn/monitor_urls
-# This script is licensed under GNU GPL version 3.0 or above
+# Licensed under GNU GPL version 3.0 or later
 
 import os
 import json
@@ -136,8 +136,11 @@ def monitor():
                 notify_discord(webhook, msg)
                 notified = True  # Mark as notified
         else:
+            # Recovery check: If previously failed and notified, send UP message
             if failure_count >= FAILURE_THRESHOLD and notified:
                 notify_discord(webhook, f"✅ {description} ({url}) UP")
+
+            # Reset failure count and notification status
             print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
             failure_count = 0  # Reset failures
             notified = False  # Reset notification status
