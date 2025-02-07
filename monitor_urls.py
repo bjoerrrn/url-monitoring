@@ -1,57 +1,60 @@
 #!/usr/bin/env python3
 
-# v1.0.2
+# v1.0.3
 # monitor_urls - by bjoerrrn
 # github: https://github.com/bjoerrrn/monitor_urls
 # Licensed under GNU GPL version 3.0 or later
+
+#!/usr/bin/env python3
 
 import os
 import json
 import requests
 import shlex
 import urllib3
-from bs4 import BeautifulSoup  # For better keyword detection
+import logging
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
-# Suppress SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuration
+# Configurations
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_urls.credo")
 FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failures.json")
 FAILURE_THRESHOLD = 5
-TIMEOUT = 10  # Increased timeout for local IPs
+TIMEOUT = 10  
+RETRY_COUNT = 2  # Retry before marking as DOWN
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_urls.log")
 
-# Load failure counts & notification states
+# Set up logging
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
 def load_failures():
     if os.path.exists(FAILURE_FILE):
         try:
             with open(FAILURE_FILE, "r") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            print("[ERROR] Failed to parse failures.json, resetting...")
+            logging.error("Failed to parse failures.json, resetting...")
             return {}
     return {}
 
-# Save failure counts & notification states
 def save_failures(failures):
     with open(FAILURE_FILE, "w") as f:
         json.dump(failures, f, indent=2)
 
-# Persistent tracking of failures and sent notifications
 failures = load_failures()
 
-def is_local_ip(url):
-    """Returns True if the URL is a local network IP (192.168.x.x or similar)."""
+def is_internal_ip(url):
     parsed_url = urlparse(url)
     hostname = parsed_url.hostname
-    return hostname.startswith("192.168.") or hostname.startswith("10.") or hostname.endswith(".local")
+    return hostname and hostname.startswith("192.168.178.")
 
 def load_urls():
     """Load URLs, webhooks, descriptions, and optional keywords from the config file."""
     urls = []
     if not os.path.exists(CONFIG_FILE):
-        print(f"[ERROR] Config file {CONFIG_FILE} not found.")
+        logging.error(f"Config file {CONFIG_FILE} not found.")
         return urls
     
     try:
@@ -60,32 +63,31 @@ def load_urls():
                 line = line.strip()
                 if line and not line.startswith("#"):
                     parts = shlex.split(line)
-                    if len(parts) < 3:  # Require at least description, URL, and webhook
+                    if len(parts) < 3:
                         continue
                     description, url, webhook = parts[:3]
                     keyword = parts[3] if len(parts) > 3 else None
                     urls.append({"description": description, "url": url, "webhook": webhook, "keyword": keyword})
     except Exception as e:
-        print(f"[ERROR] Loading config: {e}")
+        logging.error(f"Error loading config: {e}")
     
     return urls
 
 def check_url(url):
-    """Checks if a URL is reachable and returns the HTML content."""
-    try:
-        verify_ssl = not is_local_ip(url)  # Disable SSL verification for local IPs
-        print(f"[DEBUG] Checking {url} (SSL Verification: {verify_ssl})...")
-        response = requests.get(url, timeout=TIMEOUT, verify=verify_ssl)
-        print(f"[DEBUG] {url} status: {response.status_code}")
-        if response.status_code == 200:
-            return True, response.text
-        return False, None
-    except requests.RequestException as e:
-        print(f"[ERROR] Failed to reach {url}: {e}")
-        return False, None
+    """Checks if a URL is reachable, retries before marking it as DOWN."""
+    verify_ssl = not is_internal_ip(url)
+    for attempt in range(1, RETRY_COUNT + 1):
+        try:
+            logging.info(f"Checking {url} (Attempt {attempt}/{RETRY_COUNT})")
+            response = requests.get(url, timeout=TIMEOUT, verify=verify_ssl)
+            if response.status_code in [200, 401]:
+                return True, response.text
+        except requests.RequestException as e:
+            logging.warning(f"Failed attempt {attempt}: {e}")
+    return False, None
 
 def keyword_found(content, keyword):
-    """Checks if the keyword exists in the page content (ignoring HTML tags and case)."""
+    """Checks if the keyword exists in the page content."""
     if not content or not keyword:
         return False
 
@@ -96,12 +98,12 @@ def keyword_found(content, keyword):
     return keyword in text_only
 
 def notify_discord(webhook, message):
-    """Sends a notification to Discord and prints it."""
-    print(f"[NOTIFY] {message}")  # Print for debugging
+    """Sends a notification to Discord and logs it."""
+    logging.info(f"NOTIFY: {message}")
     try:
         requests.post(webhook, json={"content": message})
     except requests.RequestException as e:
-        print(f"[ERROR] Discord notification failed: {e}")
+        logging.error(f"Discord notification failed: {e}")
 
 def monitor():
     """Monitors URLs, sending alerts on failures and recoveries only once."""
@@ -115,41 +117,37 @@ def monitor():
         keyword = entry["keyword"]
 
         reachable, content = check_url(url)
-
         keyword_missing = keyword and reachable and not keyword_found(content, keyword)
 
-        # Load existing failure count & notification status
-        failure_data = failures.get(url, {"failures": 0, "notified": False})
-        failure_count = failure_data["failures"]
-        notified = failure_data["notified"]
+        if url not in failures:
+            failures[url] = {"failures": 0, "notified_down": False, "notified_up": False}
+
+        failure_count = failures[url]["failures"]
+        notified_down = failures[url]["notified_down"]
+        notified_up = failures[url]["notified_up"]
 
         if not reachable or keyword_missing:
-            failure_count = min(failure_count + 1, FAILURE_THRESHOLD)  # Cap at threshold
-            print(f"[WARNING] {description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
+            failure_count += 1
+            logging.warning(f"{description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
 
-            # Notify only once when threshold is reached
-            if failure_count >= FAILURE_THRESHOLD and not notified:
-                if not reachable:
-                    msg = f"❌ {description} ({url}) DOWN"
-                elif keyword_missing:
-                    msg = f"⚠️ {description} ({url}) MISSING '{keyword}'"
+            if failure_count >= FAILURE_THRESHOLD and not notified_down:
+                msg = f"❌ {description} ({url}) DOWN" if not reachable else f"⚠️ {description} ({url}) MISSING '{keyword}'"
                 notify_discord(webhook, msg)
-                notified = True  # Mark as notified
+                failures[url]["notified_down"] = True
+                failures[url]["notified_up"] = False  
+
+            failures[url]["failures"] = failure_count  
+
         else:
-            # ✅ FIX: Recovery Notification Now Sent Correctly
-            if failure_count >= FAILURE_THRESHOLD and notified:
-                print(f"[INFO] {description} ({url}) RECOVERED! Sending ✅ notification.")
+            if failure_count >= FAILURE_THRESHOLD and not notified_up:
+                logging.info(f"{description} ({url}) RECOVERED! Sending ✅ notification.")
                 notify_discord(webhook, f"✅ {description} ({url}) UP")
+                failures[url]["notified_up"] = True
+                failures[url]["notified_down"] = False  
 
-            # ✅ FIX: Reset failure count *after* sending recovery message
-            print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
-            failure_count = 0  # Reset failures
-            notified = False  # Reset notification status
+            logging.info(f"{description} ({url}) is UP (Failures Reset).")
+            failures[url]["failures"] = 0  
 
-        # Save updated failure count & notification status
-        failures[url] = {"failures": failure_count, "notified": notified}
-
-    # Persist failure states
     save_failures(failures)
 
 if __name__ == "__main__":
