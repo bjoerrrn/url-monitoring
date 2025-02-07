@@ -5,8 +5,6 @@
 # github: https://github.com/bjoerrrn/monitor_urls
 # Licensed under GNU GPL version 3.0 or later
 
-#!/usr/bin/env python3
-
 import os
 import json
 import requests
@@ -24,24 +22,31 @@ FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failure
 FAILURE_THRESHOLD = 5
 TIMEOUT = 10  
 RETRY_COUNT = 2  # Retry before marking as DOWN
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_urls.log")
+LOG_FILE = "monitor_urls.log"
 
 # Set up logging
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def load_failures():
+    """Load failure tracking data, reset on corruption."""
     if os.path.exists(FAILURE_FILE):
         try:
             with open(FAILURE_FILE, "r") as f:
                 return json.load(f)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, IOError):
             logging.error("Failed to parse failures.json, resetting...")
+            print("[ERROR] Corrupted failures.json, resetting failure tracking.")
             return {}
     return {}
 
 def save_failures(failures):
-    with open(FAILURE_FILE, "w") as f:
-        json.dump(failures, f, indent=2)
+    """Save failure tracking data safely."""
+    try:
+        with open(FAILURE_FILE, "w") as f:
+            json.dump(failures, f, indent=2)
+    except IOError as e:
+        logging.error(f"Failed to save failures.json: {e}")
+        print(f"[ERROR] Unable to save failure data: {e}")
 
 failures = load_failures()
 
@@ -55,6 +60,7 @@ def load_urls():
     urls = []
     if not os.path.exists(CONFIG_FILE):
         logging.error(f"Config file {CONFIG_FILE} not found.")
+        print(f"[ERROR] Config file {CONFIG_FILE} not found.")
         return urls
     
     try:
@@ -64,12 +70,15 @@ def load_urls():
                 if line and not line.startswith("#"):
                     parts = shlex.split(line)
                     if len(parts) < 3:
+                        logging.warning(f"Invalid line in config: {line}")
+                        print(f"[WARNING] Skipping invalid config line: {line}")
                         continue
                     description, url, webhook = parts[:3]
                     keyword = parts[3] if len(parts) > 3 else None
                     urls.append({"description": description, "url": url, "webhook": webhook, "keyword": keyword})
     except Exception as e:
         logging.error(f"Error loading config: {e}")
+        print(f"[ERROR] Could not load config file: {e}")
     
     return urls
 
@@ -79,11 +88,13 @@ def check_url(url):
     for attempt in range(1, RETRY_COUNT + 1):
         try:
             logging.info(f"Checking {url} (Attempt {attempt}/{RETRY_COUNT})")
+            print(f"[INFO] Checking {url} (Attempt {attempt}/{RETRY_COUNT})")
             response = requests.get(url, timeout=TIMEOUT, verify=verify_ssl)
             if response.status_code in [200, 401]:
                 return True, response.text
         except requests.RequestException as e:
-            logging.warning(f"Failed attempt {attempt}: {e}")
+            logging.warning(f"Failed attempt {attempt} for {url}: {e}")
+            print(f"[WARNING] {url} failed (Attempt {attempt})")
     return False, None
 
 def keyword_found(content, keyword):
@@ -100,10 +111,12 @@ def keyword_found(content, keyword):
 def notify_discord(webhook, message):
     """Sends a notification to Discord and logs it."""
     logging.info(f"NOTIFY: {message}")
+    print(f"[NOTIFY] {message}")
     try:
         requests.post(webhook, json={"content": message})
     except requests.RequestException as e:
         logging.error(f"Discord notification failed: {e}")
+        print(f"[ERROR] Failed to send Discord notification: {e}")
 
 def monitor():
     """Monitors URLs, sending alerts on failures and recoveries only once."""
@@ -116,6 +129,7 @@ def monitor():
         webhook = entry["webhook"]
         keyword = entry["keyword"]
 
+        print(f"\n[INFO] Checking {description} ({url})...")
         reachable, content = check_url(url)
         keyword_missing = keyword and reachable and not keyword_found(content, keyword)
 
@@ -129,6 +143,7 @@ def monitor():
         if not reachable or keyword_missing:
             failure_count += 1
             logging.warning(f"{description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
+            print(f"[WARNING] {description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
 
             if failure_count >= FAILURE_THRESHOLD and not notified_down:
                 msg = f"❌ {description} ({url}) DOWN" if not reachable else f"⚠️ {description} ({url}) MISSING '{keyword}'"
@@ -141,14 +156,18 @@ def monitor():
         else:
             if failure_count >= FAILURE_THRESHOLD and not notified_up:
                 logging.info(f"{description} ({url}) RECOVERED! Sending ✅ notification.")
+                print(f"[INFO] {description} ({url}) RECOVERED! Sending ✅ notification.")
                 notify_discord(webhook, f"✅ {description} ({url}) UP")
                 failures[url]["notified_up"] = True
                 failures[url]["notified_down"] = False  
 
             logging.info(f"{description} ({url}) is UP (Failures Reset).")
+            print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
             failures[url]["failures"] = 0  
 
     save_failures(failures)
 
 if __name__ == "__main__":
+    print("\n[INFO] Starting URL monitor...\n")
     monitor()
+    print("\n[INFO] Monitoring completed.\n")
