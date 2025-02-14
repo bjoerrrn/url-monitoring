@@ -58,9 +58,9 @@ Save and exit.
 
 📢 Discord Notifications
 ```
-❌ {url} DOWN" → Sent when URL is unreachable.
+❌ {url}" → Sent when URL is unreachable.
 ⚠️ {url} MISSING '{keyword}'" → Sent when keyword check fails.
-✅ {url} UP" → Sent when a previously failing URL recovers.
+✅ {url}" → Sent when a previously failing URL recovers.
 ```
 
 ### **🤝 Contributing**
