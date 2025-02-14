@@ -5,6 +5,9 @@
 # github: https://github.com/bjoerrrn/monitor_urls
 # Licensed under GNU GPL version 3.0 or later
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 import os
 import json
 import requests
@@ -146,7 +149,7 @@ def monitor():
             print(f"[WARNING] {description} ({url}) failure count: {failure_count}/{FAILURE_THRESHOLD}")
 
             if failure_count >= FAILURE_THRESHOLD and not notified_down:
-                msg = f"❌ {description} ({url}) DOWN" if not reachable else f"⚠️ {description} ({url}) MISSING '{keyword}'"
+                msg = f"❌ {description} ({url})" if not reachable else f"⚠️ {description} ({url}) MISSING '{keyword}'"
                 notify_discord(webhook, msg)
                 failures[url]["notified_down"] = True
                 failures[url]["notified_up"] = False  
@@ -157,7 +160,7 @@ def monitor():
             if failure_count >= FAILURE_THRESHOLD and not notified_up:
                 logging.info(f"{description} ({url}) RECOVERED! Sending ✅ notification.")
                 print(f"[INFO] {description} ({url}) RECOVERED! Sending ✅ notification.")
-                notify_discord(webhook, f"✅ {description} ({url}) UP")
+                notify_discord(webhook, f"✅ {description} ({url})")
                 failures[url]["notified_up"] = True
                 failures[url]["notified_down"] = False  
 
