@@ -1,4 +1,4 @@
-![stars](https://img.shields.io/github/stars/bjoerrrn/monitor-urls) ![last_commit](https://img.shields.io/github/last-commit/bjoerrrn/monitor-urls)
+![stars](https://img.shields.io/github/stars/bjoerrrn/url-monitoring) ![last_commit](https://img.shields.io/github/last-commit/bjoerrrn/url-monitoring)
 
 # Monitor URLs
 
@@ -23,7 +23,7 @@ pip install requests beautifulsoup4 urllib3
 
 ### **2️⃣ Clone This Repository**
 ```bash
-git clone https://github.com/bjoerrrn/monitor-urls
+git clone https://github.com/bjoerrrn/url-monitoring
    cd monitor-urls
 ```
 
@@ -49,7 +49,7 @@ crontab -e
 
 Add the following line at the bottom:
 ```bash
-* * * * * /usr/bin/python3 /home/pi/monitor-urls/monitor_urls.py
+* * * * * /usr/bin/python3 /home/pi/url-monitoring/url-monitor.py
 ```
 
 Save and exit.
