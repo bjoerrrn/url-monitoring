@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# v1.0.3
+# v1.1.1
 # url-monitoring - by bjoerrrn
 # github: https://github.com/bjoerrrn/url-monitoring
 # Licensed under GNU GPL version 3.0 or later
@@ -25,10 +25,15 @@ FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failure
 FAILURE_THRESHOLD = 5
 TIMEOUT = 10  
 RETRY_COUNT = 2  # Retry before marking as DOWN
-LOG_FILE = "url-monitor.log"
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "url-monitor.log")
 
 # Set up logging
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    filename=LOG_FILE, 
+    level=logging.INFO, 
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    force=True  # Ensures logging resets properly when run via crontab
+)
 
 def load_failures():
     """Load failure tracking data, reset on corruption."""
