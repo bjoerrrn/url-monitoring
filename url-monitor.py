@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-# v1.1.1
-# url-monitoring - by bjoerrrn
-# github: https://github.com/bjoerrrn/url-monitoring
+# v1.2.0
+# url-monitoring - pushover version
+# based on: https://github.com/bjoerrrn/url-monitoring
+# Modified to use Pushover instead of Discord
 # Licensed under GNU GPL version 3.0 or later
 
 import sys
@@ -23,20 +24,23 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "url-monitor.credo")
 FAILURE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "failures.json")
 FAILURE_THRESHOLD = 5
-TIMEOUT = 10  
-RETRY_COUNT = 2  # Retry before marking as DOWN
+TIMEOUT = 10
+RETRY_COUNT = 2
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "url-monitor.log")
+
+# Pushover credentials
+PUSHOVER_TOKEN = "xxx"
+PUSHOVER_USER = "xxx"
 
 # Set up logging
 logging.basicConfig(
-    filename=LOG_FILE, 
-    level=logging.INFO, 
+    filename=LOG_FILE,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    force=True  # Ensures logging resets properly when run via crontab
+    force=True
 )
 
 def load_failures():
-    """Load failure tracking data, reset on corruption."""
     if os.path.exists(FAILURE_FILE):
         try:
             with open(FAILURE_FILE, "r") as f:
@@ -48,7 +52,6 @@ def load_failures():
     return {}
 
 def save_failures(failures):
-    """Save failure tracking data safely."""
     try:
         with open(FAILURE_FILE, "w") as f:
             json.dump(failures, f, indent=2)
@@ -56,42 +59,36 @@ def save_failures(failures):
         logging.error(f"Failed to save failures.json: {e}")
         print(f"[ERROR] Unable to save failure data: {e}")
 
-failures = load_failures()
-
 def is_internal_ip(url):
     parsed_url = urlparse(url)
     hostname = parsed_url.hostname
     return hostname and hostname.startswith("192.168.178.")
 
 def load_urls():
-    """Load URLs, webhooks, descriptions, and optional keywords from the config file."""
     urls = []
     if not os.path.exists(CONFIG_FILE):
         logging.error(f"Config file {CONFIG_FILE} not found.")
         print(f"[ERROR] Config file {CONFIG_FILE} not found.")
         return urls
-    
     try:
         with open(CONFIG_FILE, "r") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     parts = shlex.split(line)
-                    if len(parts) < 3:
+                    if len(parts) < 2:
                         logging.warning(f"Invalid line in config: {line}")
                         print(f"[WARNING] Skipping invalid config line: {line}")
                         continue
-                    description, url, webhook = parts[:3]
-                    keyword = parts[3] if len(parts) > 3 else None
-                    urls.append({"description": description, "url": url, "webhook": webhook, "keyword": keyword})
+                    description, url = parts[:2]
+                    keyword = parts[2] if len(parts) > 2 else None
+                    urls.append({"description": description, "url": url, "keyword": keyword})
     except Exception as e:
         logging.error(f"Error loading config: {e}")
         print(f"[ERROR] Could not load config file: {e}")
-    
     return urls
 
 def check_url(url):
-    """Checks if a URL is reachable, retries before marking it as DOWN."""
     verify_ssl = not is_internal_ip(url)
     for attempt in range(1, RETRY_COUNT + 1):
         try:
@@ -106,35 +103,33 @@ def check_url(url):
     return False, None
 
 def keyword_found(content, keyword):
-    """Checks if the keyword exists in the page content."""
     if not content or not keyword:
         return False
-
     keyword = keyword.lower()
     soup = BeautifulSoup(content, "html.parser")
     text_only = soup.get_text().lower()
-
     return keyword in text_only
 
-def notify_discord(webhook, message):
-    """Sends a notification to Discord and logs it."""
+def notify_pushover(message):
     logging.info(f"NOTIFY: {message}")
     print(f"[NOTIFY] {message}")
     try:
-        requests.post(webhook, json={"content": message})
+        requests.post("https://api.pushover.net/1/messages.json", data={
+            "token": PUSHOVER_TOKEN,
+            "user": PUSHOVER_USER,
+            "message": message
+        })
     except requests.RequestException as e:
-        logging.error(f"Discord notification failed: {e}")
-        print(f"[ERROR] Failed to send Discord notification: {e}")
+        logging.error(f"Pushover notification failed: {e}")
+        print(f"[ERROR] Failed to send Pushover notification: {e}")
 
 def monitor():
-    """Monitors URLs, sending alerts on failures and recoveries only once."""
-    global failures
+    failures = load_failures()
     urls = load_urls()
-    
+
     for entry in urls:
         description = entry["description"]
         url = entry["url"]
-        webhook = entry["webhook"]
         keyword = entry["keyword"]
 
         print(f"\n[INFO] Checking {description} ({url})...")
@@ -155,23 +150,23 @@ def monitor():
 
             if failure_count >= FAILURE_THRESHOLD and not notified_down:
                 msg = f"❌ {description} ({url})" if not reachable else f"⚠️ {description} ({url}) MISSING '{keyword}'"
-                notify_discord(webhook, msg)
+                notify_pushover(msg)
                 failures[url]["notified_down"] = True
-                failures[url]["notified_up"] = False  
+                failures[url]["notified_up"] = False
 
-            failures[url]["failures"] = failure_count  
+            failures[url]["failures"] = failure_count
 
         else:
             if failure_count >= FAILURE_THRESHOLD and not notified_up:
                 logging.info(f"{description} ({url}) RECOVERED! Sending ✅ notification.")
                 print(f"[INFO] {description} ({url}) RECOVERED! Sending ✅ notification.")
-                notify_discord(webhook, f"✅ {description} ({url})")
+                notify_pushover(f"✅ {description} ({url})")
                 failures[url]["notified_up"] = True
-                failures[url]["notified_down"] = False  
+                failures[url]["notified_down"] = False
 
             logging.info(f"{description} ({url}) is UP (Failures Reset).")
             print(f"[INFO] {description} ({url}) is UP (Failures Reset).")
-            failures[url]["failures"] = 0  
+            failures[url]["failures"] = 0
 
     save_failures(failures)
 
