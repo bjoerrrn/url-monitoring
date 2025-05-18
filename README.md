@@ -2,12 +2,12 @@
 
 # Monitor URLs
 
-This script monitors a list of URLs, checking if they are reachable. If a URL fails 5 times, a notification is sent to a Discord webhook.
+This script monitors a list of URLs, checking if they are reachable. If a URL fails 5 times, a notification is sent to Pushover.
 
 ## Features
 - Checks HTTP/HTTPS URLs for reachability.
 - Can verify if a specific keyword exists on the page.
-- Alerts are sent to different Discord webhooks per URL.
+- Alerts are sent to Pushover.
 - Configured via a `.credo` file.
 - Runs automatically via `crontab` on a Raspberry Pi.
 
@@ -31,8 +31,8 @@ git clone https://github.com/bjoerrrn/url-monitoring
 
 Open monitor_urls.credo (needs to be in the same folder as the script) and set:
 ```bash
-# Description       URL         Webhook_URL                   Optional_Keyword
-"test"              http://...  https://...                   "test"
+# Description       URL           Optional_Keyword
+"test"              http://...    "test"
 ```
 
 ### **4️⃣ Run the Script**
@@ -56,7 +56,7 @@ Save and exit.
 
 ### **📡 Expected Output**
 
-📢 Discord Notifications
+📢 Pushover Notifications
 ```
 ❌ {url}" → Sent when URL is unreachable.
 ⚠️ {url} MISSING '{keyword}'" → Sent when keyword check fails.
